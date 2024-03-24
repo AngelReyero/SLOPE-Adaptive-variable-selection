@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 
 ```{r, include = FALSE}
-setwd("C:/Users/nafis/Desktop/Math&IA/M2/Guidelines in Machine Learning/Test Multiple")
+#setwd("C:/Users/nafis/Desktop/Math&IA/M2/Guidelines in Machine Learning/Test Multiple")
 rm(list=ls())
 graphics.off()
 library(SLOPE)
@@ -23,9 +23,9 @@ library(MASS) # Pour la génération de nombres aléatoires
 
 Ce fichier rmd est l'implémentation associée à un rendu de l'UE Guidelines in Machine Learning, suivies dans le cadre du Master 2 de Maths et Intelligence Artificielle de l'Institut Mathématiques d'Orsay de l'Université Paris-Saclay. Dans le cadre de ce rendu, nous mettons en œuvre les recommandations de l'UE Guidelines in Machine Learning en nous appuyant sur l'article de Bogdan et al. Notre démarche se focalise sur l'application de ces directives à un contexte particulier, en générant des données selon un plan de simulation spécifique.
 
-La génération des données commence par la construction d'une matrice orthogonale X, obtenue à travers la décomposition QR : X=QR, où Q est une matrice orthogonale et R est une matrice triangulaire supérieure. Ensuite, le vecteur y est défini comme une combinaison linéaire des colonnes de X, auquel est ajouté un terme d'erreur gaussienne : y=Xβ+ϵ, où ϵ est un terme d'erreur gaussienne.
+La génération des données commence par la construction d'une matrice normale Z, obtenue à travers la décomposition QR : Z=QR, où Q est une matrice orthogonale et R est une matrice triangulaire supérieure. On appellera X la matrice orthogonal Q. Ensuite, le vecteur y est défini comme une combinaison linéaire des colonnes de X, auquel est ajouté un terme d'erreur gaussienne : y=Xβ+ϵ, où ϵ est un terme d'erreur gaussienne.
 
-Nous avons adapté notre plan de simulation par rapport à celui présenté dans l'article de Bogdan et al. En particulier, nous utilisons λBH au lieu de λgaussien pour le contrôle du taux de faux découverte (FDR). Cette décision découle de la nécessité d'explorer l'efficacité de λBH dans un contexte de matrices orthogonales, en comparaison avec les matrices de design présentées dans l'article. Ainsi, nous visons à comprendre les performances de cette méthode dans des conditions spécifiques.
+Nous avons adapté notre plan de simulation par rapport à celui présenté dans l'article de Bogdan et al. 15. En particulier, nous utilisons λBH au lieu de λgaussien pour le contrôle du taux de faux découverte (FDR). Cette décision découle de la nécessité d'explorer l'efficacité de λBH dans un contexte de matrices orthogonales, en comparaison avec les matrices de design présentées dans l'article. Ainsi, nous visons à comprendre les performances de cette méthode dans des conditions spécifiques.
 
 La méthodologie adoptée comprend l'estimation des coefficients β et la mise en œuvre de λBH pour le contrôle du FDR. Nous prévoyons également d'évaluer ces méthodes en termes de leurs performances et de leur capacité à fournir des résultats fiables dans notre contexte de simulation.
 
@@ -59,9 +59,9 @@ generate_error_term <- function(n, var_error) {
 ## Partie 1:
 # Figure 1:
 
-Pour la production de la figure 1, nous utilisons une matrice de design XX qui est orthogonale, ce qui signifie que XTX=Ip, où Ip est la matrice identité de taille p×p. Comme mentionné précédemment, nous sommes dans un cadre de régression linéaire où X est orthogonale. Ainsi, la variable réponse y_tilde peut être exprimée comme y_tilde = X^t Y= βZ ∼ N(β,0).
+Pour la production de la figure 1, nous utilisons une matrice de design X qui est orthonormale, ce qui signifie que X^t X=Ip, où Ip est la matrice identité de taille p×p. Comme mentionné précédemment, nous sommes dans un cadre de régression linéaire où X est orthogonale. Ainsi, la variable réponse y_tilde peut être exprimée comme y_tilde = X^t Y= βZ ∼ N(β, σ^2Ip ).
 
-Dans cette perspective, le problème peut être considéré comme un problème de tests multiples, où nous utilisons la méthode de Bonferroni. Nous rejetons l'hypothèse nulle si ∣y_tilde_j2/σ > ϕ^{−}1(1−α/(2p)). En outre, comme nous utilisons la solution de Lasso avec une matrice de design orthogonale, il existe une solution explicite où βj=0 si et seulement si ∣_tilde_jj∣<λ. Ainsi, nous pouvons utiliser le seuillage Lasso avec ∣y_tilde_j∣  > λ_bonf = σ ϕ^{−}1(1−α/(2p)).
+Dans cette perspective, le problème peut être considéré comme un problème de tests multiples, où nous utilisons la méthode de Bonferroni. Nous rejetons l'hypothèse nulle si ∣y_tilde_j|/σ > ϕ^{−1}(1−α/(2p)). En outre, comme nous utilisons la solution de Lasso avec une matrice de design orthogonale, il existe une solution explicite où βj=0 si et seulement si ∣y_tilde_j∣<λ(soft thresholding). Ainsi, nous pouvons utiliser le seuillage Lasso avec ∣y_tilde_j∣  > λ_bonf = σ ϕ^{−1}(1−α/(2p)).
 
 ```{r, include = F}
 # Paramètres
@@ -87,7 +87,7 @@ for (k_index in seq_along(k_values)) {
     epsilon <- generate_error_term(n, var_error)
     
     # Calcul de la variable réponse
-    y <- scale(X %*% beta_true + epsilon, center = TRUE)
+    y <- scale(X %*% beta_true + epsilon, center = TRUE)## scale=FALSE!!
     
     # (1) Lasso avec lambdaBF
     lambda_bonf <- sqrt(var_error) * qnorm(1 - alpha/(2 * p))
@@ -136,7 +136,7 @@ Conclusion: Inutile, c'est trop restrictif. On contrôle le FWER mais on ne fait
 
 #Figure 2: Graphe de FDR, MSE, puissance
 
-Dans cette section, nous présentons le graphique de FDR, MSE et puissance associé à notre étude. Il est important de souligner que notre approche diffère de celle de l'article de référence, car nous utilisons lambda_BH au lieu de lambda_gaussien.
+Dans cette section, nous présentons le graphique de FDR, MSE et puissance associé à notre étude. Il est important de souligner que notre approche diffère de celle de l'article de référence, car nous utilisons lambda_BH au lieu de lambda_gaussien et matrice de design orthogonal.
 
 -Lasso Bonferroni (lasso bonf) : Cette méthode est similaire à celle précédemment décrite. Nous utilisons le seuillage Bonferroni pour contrôler le FDR.
 
@@ -152,7 +152,7 @@ Dans cette section, nous présentons le graphique de FDR, MSE et puissance assoc
 n <- 1500 # Nombre d'observations
 p <- 1500 # Nombre de variables explicatives
 num_sims <- 10
-k_values <- 0:30 # Nombre de signaux véritables variant de 1 à 50
+k_values <- 0:30 # Nombre de signaux véritables variant de 0 à 30
 var_error <- 1  # Variance du terme d'erreur
 alpha <- 0.1  # Niveau alpha pour λBonf et FDR control
 q <- 0.1  # Niveau de FDR control pour SLOPE
@@ -187,7 +187,7 @@ for (k_index in seq_along(k_values)) {
     epsilon <- generate_error_term(n, var_error)
     
     # Calcul de la variable réponse
-    y <- scale(X %*% beta_true + epsilon, center = TRUE)
+    y <- scale(X %*% beta_true + epsilon, center = TRUE, scale = FALSE)
     
     # (1) Lasso avec lambdaBF
     lambda_bonf <- sqrt(var_error) * qnorm(1 - alpha/(2 * p))
@@ -210,7 +210,7 @@ for (k_index in seq_along(k_values)) {
     # (2) Lasso avec lambdaCV
     lasso_cv_fit <- cv.glmnet(X, y, alpha = 1)
     lambda_cv <- lasso_cv_fit$lambda.min
-        lasso_cv_fit <- glmnet(X, y, alpha = 1, lambda = lambda_cv)
+    lasso_cv_fit <- glmnet(X, y, alpha = 1, lambda = lambda_cv)
     beta_lasso_cv <- coef.glmnet(lasso_cv_fit)[2:(length(beta_true)+1)]
     
     # Calcul du FDR pour le Lasso avec lambdaCV et ajout à la somme totale
@@ -228,7 +228,7 @@ for (k_index in seq_along(k_values)) {
 
 
     # (3) Adaptive Lasso
-    adaptive_lasso_fit <- glmnet(X, y, lambda = lambda_cv)
+    adaptive_lasso_fit <- glmnet(X, y, lambda = lambda_cv/10)
     beta_ols <- adaptive_lasso_fit$beta[2:(length(beta_true) + 1)]
     indices <- which(abs(beta_ols) > 1e-10)
     beta_ols_selected <- beta_ols[indices]
