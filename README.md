@@ -1,6 +1,11 @@
 # SLOPE-Adaptive-variable-selection
 This project is part of the evaluation for the Guidelines in ML subject in the second year of the MSc in Mathematics and Artificial Intelligence program at Paris-Saclay University. It focuses on SLOPE, the method introduced by (Bogdan et al., 2015), for variable selection via convex optimization.
 
+## Introduction
+
+$$\underset{b\in\mathbb{R}^p}{\mathrm{min}}\frac{1}{2}\|Y-Xb\|^2_2+\sum_{i=1}^p\lambda_i|b|_{[i]},$$
+
+where $\lambda_1\geq \ldots\geq \lambda_p$ and $|b|_{[1]}\geq \ldots \geq |b|_{[p]}$
 ## How to Run the Code
 
 This section will guide you through the process of running the code included in this R Markdown document.
