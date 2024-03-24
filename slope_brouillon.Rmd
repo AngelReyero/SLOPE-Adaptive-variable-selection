@@ -1,0 +1,694 @@
+---
+title: "Implementation for SLOPE-Adaptative Variable Selection via convex optimization"
+author: "Nafissa Benali"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r, include = FALSE}
+setwd("C:/Users/nafis/Desktop/Math&IA/M2/Guidelines in Machine Learning/Test Multiple")
+rm(list=ls())
+graphics.off()
+library(SLOPE)
+library(ggplot2)
+library(glmnet)
+library(MASS) # Pour la génération de nombres aléatoires
+```
+## Introduction:
+
+Ce fichier rmd est l'implémentation associée à un rendu de l'UE Guidelines in Machine Learning, suivies dans le cadre du Master 2 de Maths et Intelligence Artificielle de l'Institut Mathématiques d'Orsay de l'Université Paris-Saclay. Dans le cadre de ce rendu, nous mettons en œuvre les recommandations de l'UE Guidelines in Machine Learning en nous appuyant sur l'article de Bogdan et al. Notre démarche se focalise sur l'application de ces directives à un contexte particulier, en générant des données selon un plan de simulation spécifique.
+
+La génération des données commence par la construction d'une matrice orthogonale X, obtenue à travers la décomposition QR : X=QR, où Q est une matrice orthogonale et R est une matrice triangulaire supérieure. Ensuite, le vecteur y est défini comme une combinaison linéaire des colonnes de X, auquel est ajouté un terme d'erreur gaussienne : y=Xβ+ϵ, où ϵ est un terme d'erreur gaussienne.
+
+Nous avons adapté notre plan de simulation par rapport à celui présenté dans l'article de Bogdan et al. En particulier, nous utilisons λBH au lieu de λgaussien pour le contrôle du taux de faux découverte (FDR). Cette décision découle de la nécessité d'explorer l'efficacité de λBH dans un contexte de matrices orthogonales, en comparaison avec les matrices de design présentées dans l'article. Ainsi, nous visons à comprendre les performances de cette méthode dans des conditions spécifiques.
+
+La méthodologie adoptée comprend l'estimation des coefficients β et la mise en œuvre de λBH pour le contrôle du FDR. Nous prévoyons également d'évaluer ces méthodes en termes de leurs performances et de leur capacité à fournir des résultats fiables dans notre contexte de simulation.
+
+```{r}
+# Fonctions
+
+# Fonction pour générer une matrice de design orhtogonale
+generate_orthogonal_design_matrix <- function(n,p){
+  X <- matrix(rnorm(n*p, mean = 0, sd = sqrt(1/n)), nrow = n, ncol = p)
+  Q <- qr.Q(qr(X))
+  
+  return(as.matrix(Q))
+}
+
+# Fonction pour générer les coefficients de régression avec k signaux véritables
+generate_true_coefficients <- function(p, k, sigma) {
+  beta_true <- rep(0, p)
+  if (k > 0) {
+    beta_true[1:k] <- sigma * sqrt(2*log(p))
+  }
+  return(beta_true)
+}
+
+# Fonction pour générer le terme d'erreur
+generate_error_term <- function(n, var_error) {
+  epsilon <- rnorm(n, mean = 0, sd = sqrt(var_error))
+  return(epsilon)
+}
+```
+
+## Partie 1:
+# Figure 1:
+
+Pour la production de la figure 1, nous utilisons une matrice de design XX qui est orthogonale, ce qui signifie que XTX=Ip, où Ip est la matrice identité de taille p×p. Comme mentionné précédemment, nous sommes dans un cadre de régression linéaire où X est orthogonale. Ainsi, la variable réponse y_tilde peut être exprimée comme y_tilde = X^t Y= βZ ∼ N(β,0).
+
+Dans cette perspective, le problème peut être considéré comme un problème de tests multiples, où nous utilisons la méthode de Bonferroni. Nous rejetons l'hypothèse nulle si ∣y_tilde_j2/σ > ϕ^{−}1(1−α/(2p)). En outre, comme nous utilisons la solution de Lasso avec une matrice de design orthogonale, il existe une solution explicite où βj=0 si et seulement si ∣_tilde_jj∣<λ. Ainsi, nous pouvons utiliser le seuillage Lasso avec ∣y_tilde_j∣  > λ_bonf = σ ϕ^{−}1(1−α/(2p)).
+
+```{r, include = F}
+# Paramètres
+n_sims <- 100
+n <- 400
+p <- 400
+var_error <- 1
+alpha <- 0.1
+k_values <- seq(from = 0, to = 50, by = 5)
+count <- rep(0, length(k_values))
+power_list <- numeric(length(k_values))
+
+for (k_index in seq_along(k_values)) {
+  k = k_values[k_index]
+  for (sim in 1:n_sims) {
+    # Génération des variables explicatives
+    X <- generate_orthogonal_design_matrix(n, p)
+    
+    # Génération des coefficients de régression
+    beta_true <- generate_true_coefficients(p, k, var_error)
+    
+    # Génération du terme d'erreur
+    epsilon <- generate_error_term(n, var_error)
+    
+    # Calcul de la variable réponse
+    y <- scale(X %*% beta_true + epsilon, center = TRUE)
+    
+    # (1) Lasso avec lambdaBF
+    lambda_bonf <- sqrt(var_error) * qnorm(1 - alpha/(2 * p))
+    lasso_bonf_fit <- glmnet(X, y, alpha = 1, lambda = lambda_bonf)
+    #lasso_bonf_fit <- SLOPE(X,y, alpha = 'estimate', lambda = rep(lambda_bonf, p))
+    beta_lasso_bonf <- lasso_bonf_fit$beta[,1,1]
+    #beta_lasso_bonf <- lasso_bonf_fit$coefficients[2: (length(beta_true)+1)]
+    
+    if (sum(beta_lasso_bonf[(k+1):length(beta_lasso_bonf)] > 1e-10) > 0) { 
+      count[k_index] <- count[k_index] + 1
+    }
+    power_list[k_index] <- power_list[k_index] + sum(beta_lasso_bonf[1:k] > 1e-10) / max(1, k)
+  }
+  print(paste('pour k =', k, 'on compte', count[k_index], 'faux positifs et une puissance égale à', power_list[k_index]))
+}
+
+print(count)
+print(power_list)
+
+```
+
+```{r}
+# Graphe FWER, on veut compter, pour chaque simulation (on en fait 100) si beta compte un faux positif
+
+# Création du dataframe pour ggplot
+df_count <- data.frame(k_values = k_values, count = count, power = power_list)
+
+# Graphe du nombre de faux positifs en fonction de k_values
+ggplot(df_count, aes(x = k_values, y = count)) +
+  #geom_bar(stat = "identity", fill = "skyblue") +
+  geom_line() +
+  labs(title = "Nombre de faux positifs en fonction de k_values pour 100 simulations",
+       x = "k_values",
+       y = "Nombre de faux positifs")
+
+# Graphe de la puissance en fonction de k_values
+ggplot(df_count, aes(x = k_values, y = power)) +
+  geom_line() +
+  #geom_bar(stat = "identity", fill = "lightgreen") +
+  labs(title = "Puissance en fonction de k_values pour 100 simulations",
+       x = "k_values",
+       y = "Puissance")
+```
+Conclusion: Inutile, c'est trop restrictif. On contrôle le FWER mais on ne fait aucune découverte
+
+
+#Figure 2: Graphe de FDR, MSE, puissance
+
+Dans cette section, nous présentons le graphique de FDR, MSE et puissance associé à notre étude. Il est important de souligner que notre approche diffère de celle de l'article de référence, car nous utilisons lambda_BH au lieu de lambda_gaussien.
+
+-Lasso Bonferroni (lasso bonf) : Cette méthode est similaire à celle précédemment décrite. Nous utilisons le seuillage Bonferroni pour contrôler le FDR.
+
+-Lasso CV (lasso cv) : Ici, nous optons pour une approche où nous sélectionnons un lambda adapté aux données, ce qui correspond à une pénalité déterminée par la méthode de validation croisée.
+
+-Adaptive Lasso (adaptive lasso) : Dans cette méthode, nous effectuons une première estimation des coefficients, qui est ensuite utilisée comme pénalisation pour l'estimation finale.
+
+-Slope BH (slope bh) : Grâce au théorème présenté dans l'article, nous sommes en mesure de garantir le contrôle du FDR avec lambda_BH. Il est important de noter que cette méthode pénalise davantage les coefficients les plus grands, contrairement à l'Adaptive Lasso.
+
+
+```{r, include = F}
+# Paramètres
+n <- 1500 # Nombre d'observations
+p <- 1500 # Nombre de variables explicatives
+num_sims <- 10
+k_values <- 0:30 # Nombre de signaux véritables variant de 1 à 50
+var_error <- 1  # Variance du terme d'erreur
+alpha <- 0.1  # Niveau alpha pour λBonf et FDR control
+q <- 0.1  # Niveau de FDR control pour SLOPE
+
+# Initialisation du tableau pour stocker les résultats
+results <- array(NA, dim = c(length(k_values), 4, 3))  # 4 pour les méthodes (Lasso Bonf, Lasso CV, SLOPE, Adaptive Lasso) et 3 pour les critères FDR, Puissance, MSE
+
+# Simulation
+for (k_index in seq_along(k_values)) {
+  k <- k_values[k_index]
+  total_fdr_lasso_bf <- 0  # Initialisation de la somme des FDR pour Lasso avec lambdaBF
+  total_power_lasso_bf <- 0  # Initialisation de la somme de la puissance pour Lasso avec lambdaBF
+  total_percentage_mse_lasso_bf <- 0  # Initialisation de la somme du pourcentage de MSE pour Lasso avec lambdaBF
+  total_fdr_lasso_cv <- 0  # Initialisation de la somme des FDR pour Lasso avec lambdaCV
+  total_power_lasso_cv <- 0  # Initialisation de la somme de la puissance pour Lasso avec lambdaCV
+  total_percentage_mse_lasso_cv <- 0  # Initialisation de la somme du pourcentage de MSE pour Lasso avec lambdaCV
+  total_fdr_slope <- 0  # Initialisation de la somme des FDR pour SLOPE
+  total_power_slope <- 0  # Initialisation de la somme de la puissance pour SLOPE
+  total_percentage_mse_slope <- 0  # Initialisation de la somme du pourcentage de MSE pour SLOPE
+  total_fdr_adaptive_lasso <- 0  # Initialisation de la somme des FDR pour Adaptive Lasso
+  total_power_adaptive_lasso <- 0  # Initialisation de la somme de la puissance pour Adaptive Lasso
+  total_percentage_mse_adaptive_lasso <- 0  # Initialisation de la somme du pourcentage de MSE pour Adaptive Lasso
+  
+  for (sim in 1:num_sims) {
+    # Génération des variables explicatives
+    X <- generate_orthogonal_design_matrix(n, p)
+    
+    # Génération des coefficients de régression
+    beta_true <- generate_true_coefficients(p, k, var_error)
+    
+    # Génération du terme d'erreur
+    epsilon <- generate_error_term(n, var_error)
+    
+    # Calcul de la variable réponse
+    y <- scale(X %*% beta_true + epsilon, center = TRUE)
+    
+    # (1) Lasso avec lambdaBF
+    lambda_bonf <- sqrt(var_error) * qnorm(1 - alpha/(2 * p))
+    lasso_bonf_fit <- glmnet(X, y, lambda = lambda_bonf, alpha = 1, relax = TRUE)
+    beta_lasso_bonf <- coef.glmnet(lasso_bonf_fit)[2:(length(beta_true)+1)]
+    
+    # Calcul du FDR pour le Lasso avec lambdaBF et ajout à la somme totale
+    total_fdr_lasso_bf <- total_fdr_lasso_bf + sum(beta_lasso_bonf[(k+1):length(beta_lasso_bonf)] > 1e-10) / max(1, sum(beta_lasso_bonf > 1e-10)) * 100
+    
+    # Calcul de la puissance pour le Lasso avec lambdaBF et ajout à la somme totale
+    total_power_lasso_bf <- total_power_lasso_bf + sum(beta_lasso_bonf[1:k] > 1e-10) / max(k, 1) * 100
+    
+    # Calcul du pourcentage de MSE pour le Lasso avec lambdaBF et ajout à la somme totale
+    if (sum(beta_true > 1e-10) > 0) {
+      mse <- sum((X %*% beta_true - predict.glmnet(lasso_bonf_fit, newx = X))^2)
+      percentage_mse <- mse / sum((X %*% beta_true)^2) * 100
+      total_percentage_mse_lasso_bf <- total_percentage_mse_lasso_bf + percentage_mse
+    }
+    
+    # (2) Lasso avec lambdaCV
+    lasso_cv_fit <- cv.glmnet(X, y, alpha = 1)
+    lambda_cv <- lasso_cv_fit$lambda.min
+        lasso_cv_fit <- glmnet(X, y, alpha = 1, lambda = lambda_cv)
+    beta_lasso_cv <- coef.glmnet(lasso_cv_fit)[2:(length(beta_true)+1)]
+    
+    # Calcul du FDR pour le Lasso avec lambdaCV et ajout à la somme totale
+    total_fdr_lasso_cv <- total_fdr_lasso_cv + sum(beta_lasso_cv[(k+1):length(beta_lasso_cv)] > 1e-10) / max(1, sum(beta_lasso_cv > 1e-10)) * 100
+    
+    # Calcul de la puissance pour le Lasso avec lambdaCV et ajout à la somme totale
+    total_power_lasso_cv <- total_power_lasso_cv + sum(beta_lasso_cv[1:k] > 1e-10) / max(k, 1) * 100
+    
+    # Calcul du pourcentage de MSE pour le Lasso avec lambdaCV et ajout à la somme totale
+    if (sum(beta_true > 1e-10) > 0) {
+      mse <- sum((X %*% beta_true - X %*% beta_lasso_cv)^2)
+      percentage_mse <- mse / sum((X %*% beta_true)^2) * 100
+      total_percentage_mse_lasso_cv <- total_percentage_mse_lasso_cv + percentage_mse
+    }
+
+
+    # (3) Adaptive Lasso
+    adaptive_lasso_fit <- glmnet(X, y, lambda = lambda_cv)
+    beta_ols <- adaptive_lasso_fit$beta[2:(length(beta_true) + 1)]
+    indices <- which(abs(beta_ols) > 1e-10)
+    beta_ols_selected <- beta_ols[indices]
+
+    if (length(indices) > 2) {
+      p.fact <- 1 / abs(beta_ols_selected)
+      X_adaptive <- X[, indices]
+
+      # Exécuter la régression seulement si X_adaptive a au moins deux colonnes
+      lambda_adaptive <- cv.glmnet(X_adaptive, y, alpha = 1,  penalty.factor = p.fact)$lambda.min
+      adaptive_lasso_fit <- glmnet(X_adaptive, y, alpha = 1, penalty.factor = p.fact, lambda = lambda_adaptive)
+      beta_adaptive_lasso <- adaptive_lasso_fit$beta[2:(length(indices)+1)]
+    } else {
+      # Utiliser les coefficients de la régression ordinaire comme coefficients pour beta_adaptive_lasso
+      beta_adaptive_lasso <- beta_ols
+    }
+
+    # Calcul du FDR pour l'Adaptive Lasso et ajout à la somme totale
+
+    total_fdr_adaptive_lasso <- total_fdr_adaptive_lasso + length(indices[indices > k]) / max(1,length(indices))
+
+    # Calcul de la puissance pour l'Adaptive Lasso et ajout à la somme totale
+    total_power_adaptive_lasso <- total_power_adaptive_lasso + length(indices[indices <= k]) / max(1,k)
+
+    # Calcul du pourcentage de MSE pour l'Adaptive Lasso et ajout à la somme totale
+    if (sum(beta_true > 1e-10) > 0) {
+      if (length(indices) > 2){
+        pred = predict(adaptive_lasso_fit, newx = X_adaptive)
+      }
+      else {
+        pred = predict(adaptive_lasso_fit, newx = X)
+      }
+      mse <- sum((X %*% beta_true - pred)^2)
+      percentage_mse <- mse / sum((X %*% beta_true)^2) * 100
+      total_percentage_mse_adaptive_lasso <- total_percentage_mse_adaptive_lasso + percentage_mse
+    }
+
+    
+    # (4) SLOPE
+    slope_fit <- SLOPE(X, y, lambda = 'bh', q = q, alpha = 'estimate')
+    beta_slope <- slope_fit$coefficients[2:(length(beta_true)+1), 1, 1]
+    
+    # Calcul du FDR pour SLOPE et ajout à la somme totale
+    total_fdr_slope <- total_fdr_slope + sum(beta_slope[(k+1):length(beta_slope)] > 1e-10) / max(1, sum(beta_slope > 1e-10)) * 100
+    
+    # Calcul de la puissance pour SLOPE et ajout à la somme totale
+    total_power_slope <- total_power_slope + sum(beta_slope[1:k] > 1e-10) / max(k, 1) * 100
+    
+    # Calcul du pourcentage de MSE pour SLOPE et ajout à la somme totale
+    indices <- which(beta_slope > 1e-10)
+    X_slope <- X[, indices, drop = FALSE] 
+    if (sum(beta_true > 1e-10) > 0) {
+      df <- data.frame(X = X_slope, y = y)
+      debiased_fit <- lm(y ~ ., data = df)
+      mse <- sum((X %*% beta_true - predict.lm(debiased_fit, newdata = df))^2)
+      percentage_mse <- mse / sum((X %*% beta_true)^2) * 100
+      total_percentage_mse_slope <- total_percentage_mse_slope + percentage_mse
+    }
+  }
+  
+  # Calcul des moyennes pour cette valeur de k et mise à jour du tableau results
+  average_fdr_lasso_bf <- total_fdr_lasso_bf / num_sims
+  average_power_lasso_bf <- total_power_lasso_bf / num_sims
+  average_percentage_mse_lasso_bf <- total_percentage_mse_lasso_bf / num_sims
+  results[k_index, 1, ] <- c(average_fdr_lasso_bf, average_power_lasso_bf, average_percentage_mse_lasso_bf)
+  
+  average_fdr_lasso_cv <- total_fdr_lasso_cv / num_sims
+  average_power_lasso_cv <- total_power_lasso_cv / num_sims
+  average_percentage_mse_lasso_cv <- total_percentage_mse_lasso_cv / num_sims
+  results[k_index, 2, ] <- c(average_fdr_lasso_cv, average_power_lasso_cv, average_percentage_mse_lasso_cv)
+  
+  average_fdr_adaptive_lasso <- total_fdr_adaptive_lasso / num_sims
+  average_power_adaptive_lasso <- total_power_adaptive_lasso / num_sims
+  average_percentage_mse_adaptive_lasso <- total_percentage_mse_adaptive_lasso / num_sims
+  results[k_index, 3, ] <- c(average_fdr_adaptive_lasso, average_power_adaptive_lasso, average_percentage_mse_adaptive_lasso)
+  
+  average_fdr_slope <- total_fdr_slope / num_sims
+  average_power_slope <- total_power_slope / num_sims
+  average_percentage_mse_slope <- total_percentage_mse_slope / num_sims
+  results[k_index, 4, ] <- c(average_fdr_slope, average_power_slope, average_percentage_mse_slope)
+}
+
+# Affichage des résultats
+print(results)
+
+
+
+```
+
+
+```{r}
+#pdf("figures/graphique_FDR_MSE_puissance.pdf")
+
+library(ggplot2)
+
+# Création des graphiques pour le FDR, la puissance et le pourcentage de MSE
+for (i in 1:3) {
+  # Extraction des données pour le FDR, la puissance et le pourcentage de MSE pour chaque méthode
+  plot_data <- data.frame(k = rep(k_values[1:27], 4),
+                          value = c(results[1:27, 1, i], results[1:27, 2, i], results[1:27, 3, i], results[1:27, 4, i]),
+                          Method = factor(rep(c("Lasso with lambdaBF", "Lasso with lambdaCV","Adaptive Lasso", "SLOPE"), each = length(k_values[1:27]))))
+  
+  # Création du graphique
+  p <- ggplot(plot_data, aes(x = k, y = value, color = Method)) +
+    geom_line() +
+    labs(title = if (i == 1) "FDR" else if (i == 2) "Power" else "Percentage MSE",
+         x = "Number of relevant features (k)",
+         y = if (i == 1) "FDR" else if (i == 2) "Power" else "Percentage MSE") +
+    theme_minimal()
+  
+  # Affichage du graphique
+  print(p)
+}
+
+#pdf_file <- "figures/graphique.pdf"
+#pdf(pdf_file, width = 8, height = 6)
+
+#dev.off()
+
+```
+Observations :
+Nous observons que pour éviter le rétrécissement excessif induit par le Lasso, nous mettons en œuvre un algorithme en deux étapes. Tout d'abord, nous utilisons le Lasso pour sélectionner les variables pertinentes, puis nous utilisons la régression linéaire ordinaire (OLS) pour estimer correctement et sans biais les coefficients. Cette approche peut être implémentée en utilisant l'argument relax = TRUE.
+
+Conclusion :
+Nous constatons que le Lasso Bonferroni ne semble pas être efficace pour faire des découvertes significatives, puisqu'il ne produit aucun résultat de ce type. Le Lasso CV montre une bonne précision en termes de MSE, mais il ne contrôle pas le FDR de manière appropriée. En revanche, le Slope BH parvient à contrôler le FDR tout en réalisant des découvertes significatives.
+
+adaptivelasso?
+
+
+#Figure 3: Différentes valeurs de q
+
+Dans cette section, nous explorons les différentes valeurs de q pour lesquelles nous vérifions le contrôle du FDR à l'aide du théorème. Nous utilisons ici q pour représenter différentes valeurs d'α, à savoir α=0.05, 0.1, et 0.2, pour des raisons de lisibilité dans le code.
+
+
+```{r, include = F}
+n <- 800 # Nombre d'observations
+p <- 800 # Nombre de variables explicatives
+num_sims = 70 #essayer 500
+k_values <- 0:16 # Nombre de signaux véritables variant de 1 à 50
+var_error <- 1  # Variance du terme d'erreur
+alpha <- 0.1  # Niveau alpha pour λBonf et FDR control
+q_list = array(NA, dim =c(3,length(k_values)) )
+q_values = c(0.05,0.1,0.2)
+
+for (q_index in seq_along(q_values)){
+  q = q_values[q_index]
+  print(q)
+  for (k_index in seq_along(k_values)) {
+    k <- k_values[k_index]
+    total_fdr_slope <- 0  # Initialisation de la somme des FDR pour Lasso avec lambdaBF
+    for (sim in 1:num_sims) {
+      # Génération des variables explicatives
+      X <- generate_orthogonal_design_matrix(n, p)
+      
+      # Génération des coefficients de régression
+      beta_true <- generate_true_coefficients(p, k, var_error)
+      
+      # Génération du terme d'erreur
+      epsilon <- generate_error_term(n, var_error)
+      
+      # Calcul de la variable réponse
+      y <- scale(X %*% beta_true + epsilon, center = T)
+      
+      # (3) SLOPE
+      slope_fit <- SLOPE(X, y, lambda = 'bh', q = q, alpha = 'estimate')
+      beta_slope <- slope_fit$coefficients[2:(length(beta_true)+1),1,1]
+
+      # Calcul du FDR pour SLOPE et ajout à la somme totale
+      total_fdr_slope <- total_fdr_slope + sum(beta_slope[(k+1):length(beta_true)] > 1e-10) / max(1,sum(beta_slope > 1e-10))*100
+    }
+    # Ajout de la moyenne des FDR calculée à q_list
+    q_list[q_index, k_index] <- total_fdr_slope / num_sims
+  }
+}
+
+```
+
+```{r}
+
+# Convertir les données en un format adapté pour ggplot
+df <- data.frame(
+  k = rep(k_values, each = length(q_values)),
+  q = rep(q_values, length(k_values)),
+  fdr = as.vector(q_list)
+)
+
+# Créer le graphe
+gg <- ggplot(df, aes(x = k, y = fdr, color = as.factor(q))) +
+  geom_line() +
+  geom_point() +
+  labs(x = "Number of relevant features",
+       y = "FDR (%)",
+       color = expression("Valeur de " ~ alpha)) +
+  scale_color_discrete(name = expression("Valeur de " ~ alpha)) +
+  theme_minimal()
+
+# Sauvegarder la figure au format PDF
+pdf("figures/figure_3.pdf")
+print(gg)
+dev.off()
+
+```
+Observations :
+En observant les résultats, nous constatons que le contrôle du FDR est effectivement maintenu, comme le prédit le théorème, avec une matrice orthogonale. De plus, nous notons que le seuil de rejet dépend de la valeur de αα, ce qui est en accord avec les observations faites dans l'article de référence.
+
+
+## Partie 2: Une application au test multiple
+
+Dans cette analyse comparative, nous utilisons la méthode SLOPE pour évaluer deux procédures de contrôle dans un problème avec une structure particulière. Imaginons la situation suivante : un groupe de scientifiques réalise 1000 expériences réparties dans 5 laboratoires sélectionnés de manière aléatoire. Les observations résultantes peuvent être modélisées de la manière suivante :
+
+y_{i,j} = μ_i + τ_j + z_{i,j}
+
+où i = 1,…,1000 représente les expériences et j = 1,…,5 représente les laboratoires. Dans ce modèle, l'influence spécifique de chaque laboratoire est modélisée par τ_j.
+
+Cette structure de données reflète une situation réaliste où les expériences sont menées dans différents laboratoires, chacun pouvant avoir ses propres caractéristiques ou conditions expérimentales. Ainsi, l'objectif est de comprendre comment les différentes procédures de contrôle du FDR se comportent dans un tel contexte, en tenant compte de la variabilité introduite par les laboratoires.
+
+```{r}
+# Fonctions pour la partie 2
+# Calcul de mu en fonction de I et J
+calculate_mu <- function(I,J, k, sigma_matrix) {
+  
+  # Calcul de la norme euclidienne de chaque colonne de sigma_matrix^(-1/2)
+  c <- sqrt(sum(sigma_matrix[1]^2)) # changer terme de normalisation (norme d'une ligne de SIGMA^(-1/2))
+  
+  # Calcul de mu en fonction de k
+  mu <- rep(0, I)
+  for (i in 1:k) {
+    mu[i] <- sqrt(2 * log(I)) / c
+  }
+  return(mu)
+}
+
+
+# Fonction pour calculer la moyenne des colonnes de y
+calculate_y_mean <- function(y) {
+  y_mean <- rowMeans(y)
+  return(y_mean)
+}
+
+# Initialisation de la matrice de variance/covariance
+calculate_sigma_matrix <- function(sigma_tau_squared, sigma_z_squared, I, J){
+  sigma_matrix <- matrix((1/J) * sigma_tau_squared, nrow = I, ncol = I)
+  diag(sigma_matrix) <- (sigma_tau_squared + sigma_z_squared) * (1/J)
+  return(sigma_matrix)
+}
+
+# Méthode de diagonalisation pour A^(-1/2)
+calculate_inverse_sqrt_matrix_diag <- function(A) {
+  diag_decomp <- eigen(A)
+  D_sqrt_inv <- diag(1/sqrt(diag_decomp$values))  # Construire la matrice (D^(1/2))^{-1}
+  P <- diag_decomp$vectors                         # Matrice des vecteurs propres
+  return(P %*% D_sqrt_inv %*% t(P))            # Retourner A^(-1/2)
+}
+
+
+
+# Recuperation du seuil s des coefs supposés non nuls
+step_up <- function(statistics, lambda){
+  func = sort(statistics, index.return = T, decreasing = T)
+  sorted = func$x
+  indices = func$ix
+  s = max(which(sorted >= lambda), 0) #vérifier ce que ça renvoie
+  return(c(s, indices[1:s]))
+}
+# sum(beta_slope[(k+1):length(beta_true)] > 1e-10) / max(1,sum(beta_slope > 1e-10))*100
+# Calcul du FDR
+FDR_BH <- function(k,indices){
+  
+  ind = indices[indices > k]
+  fdr <- length(ind) / max(1,length(indices))
+  return(fdr)
+}
+# Calcul de la puissance
+power_func <- function(k, indices){
+  ind <- indices[indices <= k]
+  power <- length(ind) / k
+  return(power)
+}
+```
+
+#Figure 4: Comparaison du FDR entre SLOPE Gaussien et StepBH
+
+Dans cette section, nous comparons le contrôle du FDR entre les méthodes SLOPE Gaussien et StepBH dans le contexte de notre problème. Comme expliqué dans le rapport, ce problème induit une dualité entre les tests multiples et la régression linéaire.
+
+Dans le cas des tests multiples, nous traitons un cas gaussien avec une matrice de corrélations positives. Dans cette configuration, nous pouvons appliquer la méthode de Benjamini-Hochberg (BH) car nous sommes dans un cadre où la proportion de vrais nulls est proportionnelle au rang de l'hypothèse alternative. Ainsi, BH contrôle le FDR de manière appropriée.
+
+En revanche, dans le cas de la régression linéaire, bien que nous n'ayons pas une matrice orthogonale, nous avons une matrice avec une diagonale dominante. En raison des corrélations entre les covariables, au lieu d'utiliser lambda_BH, nous utilisons une généralisation appelée lambda_G. Nous allons vérifier si les deux méthodes parviennent à contrôler le FDR dans ce contexte spécifique.
+
+```{r, include = F}
+# Paramètres
+I <- 700
+J <- 5
+alpha <- 0.1
+sigma_tau_squared <- 2.5
+sigma_z_squared <- 2.5
+sigma <- (sigma_tau_squared + sigma_z_squared) / J
+k_values <- 0:40
+sigma_matrix <- calculate_sigma_matrix(sigma_tau_squared, sigma_z_squared, I, J) # -1/2
+sigma_invsquared <- calculate_inverse_sqrt_matrix_diag(sigma_matrix)
+# Initialisation du vecteur pour stocker les FDR moyens de BH
+fdr_bh_means <- numeric(length(k_values))
+# Initialisation du vecteur pour stocker les FDR moyens de SLOPE
+fdr_slope_means <- numeric(length(k_values))
+num_sims <- 50
+
+# Boucle sur les valeurs de k
+for (k_index in seq_along(k_values)) {
+  k <- k_values[k_index]
+  print(k)
+  # Initialisation du vecteur pour stocker les FDR de chaque simulation pour cette valeur de k pour BH
+  fdr_bh_simulations <- numeric(num_sims)
+  # Initialisation du vecteur pour stocker les FDR de chaque simulation pour cette valeur de k pour SLOPE
+  fdr_slope_simulations <- numeric(num_sims)
+  # Boucle sur les simulations
+  for (i in 1:num_sims) {
+    # Simulation des données
+    
+    
+    tau_j <- rnorm(J, mean = 0, sd = sqrt(sigma_tau_squared))
+    
+    z <- matrix(rnorm(I * J, mean = 0, sd = sqrt(sigma_z_squared)), nrow = I, ncol = J)
+
+    if (k==0){
+      mu = rep(0,I)
+    }
+    else{
+      mu = calculate_mu(I, J, k, sigma_invsquared)
+    }
+    
+    
+    y <- matrix(0, nrow = I, ncol = J)
+    for (j in 1:J) {
+      y[, j] <- mu + tau_j[j] + z[, j]
+    }
+    # Méthode BH
+    
+    # On fait la moyenne sur les colonnes de y pour avoir un vecteur de taille I
+    y_mean = calculate_y_mean(y)
+    
+    lambda_bh <- qnorm(1 - alpha * 1:I / (2 * I))
+    step = step_up(abs(y_mean)/sigma, lambda_bh)
+    s = step[1]
+
+    indices = step[2:length(step)]
+    
+    fdr_bh_simulations[i] <- FDR_BH(k, indices)
+    
+    # Methode SLOPE
+    epsilon <- mvrnorm(n = 1, mu = rep(0, I), Sigma = diag(I))
+    if (k==0){
+      y_tilde = epsilon
+    }
+    else{
+      y_tilde = sigma_invsquared %*% mu + epsilon
+    }
+    
+    
+    mu_slope = SLOPE(sigma_invsquared, y_tilde, q = alpha, alpha = 'estimate', lambda = 'gaussian')$coefficients[2:(length(mu)+1)]
+    fdr_slope_simulations[i] <- sum(mu_slope[(k+1):length(mu)] > 1e-10) / max(1, sum(mu_slope > 1e-10))
+  }
+  
+  # Calcul du FDR moyen pour cette valeur de k pour BH
+  fdr_bh_means[k_index] <- mean(fdr_bh_simulations)
+  # Calcul du FDR moyen pour cette valeur de k pour SLOPE
+  fdr_slope_means[k_index] <- mean(fdr_slope_simulations)
+}
+
+```
+
+
+```{r}
+#pdf("figures/figure_4.pdf")
+# Affichage des résultats
+plot(k_values, fdr_bh_means, type = "l", xlab = "k", ylab = "FDR", main = "FDR comparison for BH and SLOPE", ylim = c(0,0.4))
+lines(k_values, fdr_slope_means, col = "red")
+legend("topright", legend = c("BH", "SLOPE"), col = c("black", "red"), lty = 1)
+#dev.off()
+
+```
+Conclusion :
+Nous observons que les deux méthodes, SLOPE Gaussien et StepBH, parviennent à contrôler efficacement le FDR dans notre problème. Cela confirme la robustesse de ces approches dans des situations où la structure des données peut être complexe et où des corrélations entre les covariables peuvent être présentes.
+
+#Figure 5: FDP
+
+Dans cette section, nous nous intéressons à une métrique alternative au FDR : le False Discovery Proportion (FDP). Contrairement au FDR qui mesure une espérance, le FDP quantifie la proportion réelle de fausses découvertes parmi toutes les hypothèses rejetées.
+
+Il est important de souligner que même si une méthode contrôle le FDR à un niveau donné, elle peut encore présenter des comportements indésirables. Par exemple, certaines méthodes peuvent ne faire aucune découverte dans la plupart des expériences, mais produire un grand nombre de fausses découvertes dans quelques expériences.
+
+En examinant le comportement du FDP, nous pouvons obtenir un aperçu plus complet du fonctionnement de nos méthodes d'analyse dans différentes situations. Cela nous permet d'évaluer plus précisément les performances et les limitations de chaque méthode.
+
+```{r, include = F}
+#valeur fixée de k, même alpha et proportion de faux positifs sur 500 simulations
+# Paramètres
+I <- 1000
+J <- 5
+alpha <- 0.1
+sigma_tau_squared <- 2.5
+sigma_z_squared <- 2.5
+sigma <- (sigma_tau_squared + sigma_z_squared) / J
+k = 50
+sigma_matrix <- calculate_sigma_matrix(sigma_tau_squared, sigma_z_squared, I, J) # -1/2
+sigma_invsquared <- calculate_inverse_sqrt_matrix_diag(sigma_matrix)
+num_sims <- 500
+
+# Vecteurs pour stocker les FDP
+fdr_bh_values <- numeric(num_sims)
+fdr_slope_values <- numeric(num_sims)
+
+# Simulation
+for (sim in 1:num_sims) {
+  print(sim)
+  
+  # Génération des données
+  tau_j <- rnorm(J, mean = 0, sd = sqrt(sigma_tau_squared))
+  z <- matrix(rnorm(I * J, mean = 0, sd = sqrt(sigma_z_squared)), nrow = I, ncol = J)
+
+  mu <- calculate_mu(I, J, k, sigma_invsquared)
+  
+  
+  # Génération des résidus
+  epsilon <- mvrnorm(n = 1, mu = rep(0, I), Sigma = diag(I))
+  
+  # Génération de la variable réponse
+  y <- matrix(0, nrow = I, ncol = J)
+      for (j in 1:J) {
+        y[, j] <- mu + tau_j[j] + z[, j]
+      }
+  
+  # Méthode BH
+  
+  lambda_bh <- qnorm(1 - alpha * 1:I / (2 * I))
+  step <- step_up(abs(y_mean) / sigma, lambda_bh)
+  indices_bh <- step[2:length(step)]
+  fdr_bh_values[sim] <- FDR_BH(k, indices_bh)
+  
+  # Méthode SLOPE
+  y_tilde <- sigma_invsquared %*% mu + epsilon
+  
+  mu_slope <- SLOPE(sigma_invsquared, y_tilde, q = alpha, alpha = 'estimate', lambda = 'gaussian')$coefficients[2:(length(mu) + 1)]
+  fdr_slope_values[sim] <- sum(mu_slope[(k + 1):length(mu)] > 1e-10) / max(1, sum(mu_slope > 1e-10))
+}
+
+
+
+
+```
+
+```{r}
+# Histogramme de la répartition du FDP pour BH et SLOPE
+#pdf("figures/figure_5.pdf")
+par(mfrow = c(1, 2))
+hist(fdr_bh_values, main = "Répartition du FDP (BH)", xlab = "FDP", col = "lightblue", border = "black", xlim = c(0, 1))
+hist(fdr_slope_values, main = "Répartition du FDP (SLOPE)", xlab = "FDP", col = "lightgreen", border = "black", xlim = c(0, 1))
+#dev.off()
+```
+
+Conclusion :
+Même s'il n'existe aucun résultat théorique sur le FDP pour la méthode SLOPE, nous observons que son comportement est généralement plus souhaitable que celui de la méthode BH. En effet, avec BH, la plupart des expériences ne font aucune découverte, et lorsqu'il y en a, il n'y a aucune garantie sur leur validité. En revanche, avec SLOPE, le FDP est généralement mieux contrôlé, ce qui suggère une meilleure performance dans la gestion des découvertes significatives.
+
+
+
+
+
