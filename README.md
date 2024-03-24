@@ -6,7 +6,7 @@ In this project, we aim to explain how the following convex optimization problem
 
 $$\underset{b\in\mathbb{R}^p}{\mathrm{min}}\frac{1}{2}\|Y-Xb\|^2_2+\sum_{i=1}^p\lambda_i|b|_{[i]},$$
 
-where $\lambda_1\geq \ldots\geq \lambda_p$ and $|b|_{\[1\]}\geq ... \geq |b|_{\[p\]}$. Different choices of sequences of penalty are discussed. 
+where $\lambda_1\geq \ldots\geq \lambda_p$ and $|b|_{\[1\]}\geq...\geq|b|_{\[p\]}$. Different choices of sequences of penalty are discussed. 
 
 ## How to Run the Code
 
